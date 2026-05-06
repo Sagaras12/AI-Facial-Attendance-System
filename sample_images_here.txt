@@ -1,0 +1,8 @@
+Add face images inside separate folders.
+
+Example:
+dataset/
+└── PersonName/
+    ├── img1.jpg
+    ├── img2.jpg        
+        
