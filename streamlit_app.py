@@ -6,32 +6,47 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import os
+import sqlite3
 
-# Page title
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
 st.set_page_config(
     page_title="AI Facial Attendance System",
     page_icon="🎯",
     layout="centered"
 )
-# Sidebar
+
+# -----------------------------
+# SIDEBAR
+# -----------------------------
 st.sidebar.title("📌 Navigation")
 
 st.sidebar.info(
     """
     AI Facial Attendance System
-    
+
     Built using:
     - Python
     - OpenCV
     - Streamlit
     - Face Recognition
+    - SQLite
     """
 )
 
+# -----------------------------
+# MAIN TITLE
+# -----------------------------
 st.title("🎯 AI Facial Attendance System")
-st.write("Real-time face recognition attendance system using AI and OpenCV")
 
-# Load encodings
+st.write(
+    "Real-time face recognition attendance system using AI and OpenCV"
+)
+
+# -----------------------------
+# LOAD ENCODINGS
+# -----------------------------
 if not os.path.exists("encodings.pkl"):
     st.error("encodings.pkl not found! Please run save_encodings.py first.")
     st.stop()
@@ -42,23 +57,48 @@ with open("encodings.pkl", "rb") as file:
 known_encodings = data["encodings"]
 known_names = data["names"]
 
-# Attendance file
-attendance_file = "attendance.csv"
+# -----------------------------
+# SQLITE DATABASE
+# -----------------------------
+conn = sqlite3.connect(
+    "attendance.db",
+    check_same_thread=False
+)
 
-# Create attendance file if not exists
-if not os.path.exists(attendance_file):
-    df = pd.DataFrame(columns=["Name", "Date", "Time"])
-    df.to_csv(attendance_file, index=False)
+cursor = conn.cursor()
 
-# Start camera button
-start = st.button("Start Camera")
-stop = st.button("Stop Camera")
+cursor.execute(
+    """
+    CREATE TABLE IF NOT EXISTS attendance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        date TEXT,
+        time TEXT
+    )
+    """
+)
+
+conn.commit()
+
+# -----------------------------
+# BUTTONS
+# -----------------------------
+col1, col2 = st.columns(2)
+
+with col1:
+    start = st.button("▶️ Start Camera")
+
+with col2:
+    stop = st.button("⏹️ Stop Camera")
 
 FRAME_WINDOW = st.image([])
 
-# Prevent repeated attendance
+# Prevent repeated messages
 marked_names = set()
 
+# -----------------------------
+# CAMERA START
+# -----------------------------
 if start:
 
     cap = cv2.VideoCapture(0)
@@ -81,7 +121,7 @@ if start:
         # Detect faces
         face_locations = face_recognition.face_locations(rgb_frame)
 
-        # Encode faces
+        # Encode detected faces
         face_encodings = face_recognition.face_encodings(
             rgb_frame,
             face_locations
@@ -112,18 +152,17 @@ if start:
                 if matches[best_match_index]:
 
                     name = known_names[best_match_index]
+                    name = name.capitalize()
 
                     confidence = round(
                         (1 - face_distances[best_match_index]) * 100,
-                        2 
+                        2
                     )
 
                     display_name = f"{name} ({confidence}%)"
-                else:
-                    display_name = "Unknown"
 
             # Rectangle color
-            color = (0, 255, 0) if name != "Unknown" else (255, 0, 0)
+            color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
 
             # Draw rectangle
             cv2.rectangle(
@@ -134,7 +173,7 @@ if start:
                 2
             )
 
-            # Display name
+            # Display label
             cv2.putText(
                 frame,
                 display_name,
@@ -145,33 +184,38 @@ if start:
                 2
             )
 
-            # Attendance marking
+            # -----------------------------
+            # ATTENDANCE LOGIC
+            # -----------------------------
             if name != "Unknown" and name not in marked_names:
 
                 now = datetime.now()
+
                 date = now.strftime("%Y-%m-%d")
                 time = now.strftime("%H:%M:%S")
 
-                existing_data = pd.read_csv(attendance_file)
+                # Check duplicate attendance
+                cursor.execute(
+                    """
+                    SELECT * FROM attendance
+                    WHERE name = ? AND date = ?
+                    """,
+                    (name, date)
+                )
 
-                already_marked = existing_data[
-                    (existing_data["Name"] == name) &
-                    (existing_data["Date"] == date)
-                ]
+                already_marked = cursor.fetchall()
 
-                if already_marked.empty:
+                if len(already_marked) == 0:
 
-                    new_entry = pd.DataFrame(
-                        [[name, date, time]],
-                        columns=["Name", "Date", "Time"]
+                    cursor.execute(
+                        """
+                        INSERT INTO attendance (name, date, time)
+                        VALUES (?, ?, ?)
+                        """,
+                        (name, date, time)
                     )
 
-                    new_entry.to_csv(
-                        attendance_file,
-                        mode='a',
-                        header=False,
-                        index=False
-                    )
+                    conn.commit()
 
                     st.toast(f"✅ Attendance marked for {name}")
 
@@ -180,8 +224,10 @@ if start:
 
                 marked_names.add(name)
 
-        # Show webcam frame
+        # Show webcam
         FRAME_WINDOW.image(frame, channels="BGR")
+
+        # Stop camera
         if stop:
             cap.release()
             st.warning("Camera stopped")
@@ -189,35 +235,60 @@ if start:
 
     cap.release()
 
-# Show attendance table
+# -----------------------------
+# DASHBOARD
+# -----------------------------
 st.markdown("---")
+
 st.subheader("📄 Attendance Dashboard")
-if os.path.exists(attendance_file):
 
-    attendance_data = pd.read_csv(attendance_file)
-
-    total_records = len(attendance_data)
-
-    unique_people = attendance_data["Name"].nunique()
-
-    col1, col2 = st.columns(2)
-
-    col1.metric("Total Attendance", total_records)
-
-    col2.metric("Unique People", unique_people)
-
-    csv = attendance_data.to_csv(index=False).encode('utf-8')
-
-    st.download_button(
-        label="📥 Download Attendance CSV",
-        data=csv,
-        file_name="attendance.csv",
-        mime="text/csv"
+attendance_data = pd.read_sql_query(
+    "SELECT * FROM attendance",
+    conn
 )
 
+if len(attendance_data) > 0:
+    
+    st.dataframe(attendance_data)
+else:
+    st.info("No attendance records found")
 
+# Metrics
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric("Total Attendance", len(attendance_data))
+
+with col2:
+    if len(attendance_data) > 0:
+        st.metric(
+            "Unique People",
+            attendance_data["name"].nunique()
+        )
+    else:
+        st.metric("Unique People", 0)
+
+# Show table
+
+
+# -----------------------------
+# DOWNLOAD BUTTON
+# -----------------------------
+csv = attendance_data.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="📥 Export Attendance Report",
+    data=csv,
+    file_name="attendance.csv",
+    mime="text/csv"
+)
+
+# -----------------------------
+# FOOTER
+# -----------------------------
 st.markdown("---")
 
 st.caption(
     "🚀 Developed by Sagar Gupta | AI Facial Attendance System"
 )
+
