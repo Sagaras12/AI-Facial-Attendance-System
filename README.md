@@ -120,6 +120,10 @@ python attendance_system.py
 ```
 
 ---
+## Screenshots
+
+### Dashboard UI
+![Dashboard](screenshots/dashboard.png)
 
 # 📄 Attendance Output
 
