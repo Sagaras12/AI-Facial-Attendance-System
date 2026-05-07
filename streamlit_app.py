@@ -48,7 +48,7 @@ st.write(
 # LOAD ENCODINGS
 # -----------------------------
 if not os.path.exists("encodings.pkl"):
-    st.error("encodings.pkl not found! Please run save_encodings.py first.")
+    st.warning("Demo Version: Face recognition disabled because no dataset is included.")
     st.stop()
 
 with open("encodings.pkl", "rb") as file:
